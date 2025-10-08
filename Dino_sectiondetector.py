@@ -13,6 +13,10 @@ try:
     import os
     import sys
     import random
+    import tempfile
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
+    import seaborn as sns
 except ImportError as e:
     if "_ARRAY_API not found" in str(e) or "NumPy" in str(e):
         print("❌ NumPy Compatibility Error Detected!")
@@ -57,6 +61,10 @@ class PDFSectionDetector:
         self.processor = AutoImageProcessor.from_pretrained(model_name)
         self.model = AutoModel.from_pretrained(model_name).to(self.device)
         self.model.eval()
+        
+        # Create temp directory for embedding visualizations
+        self.temp_dir = tempfile.mkdtemp(prefix="dino_embeddings_")
+        print(f"Embedding visualizations will be saved to: {self.temp_dir}")
     
     def _safe_int_conversion(self, value):
         """Safely convert numpy scalar or other types to Python int"""
@@ -636,6 +644,17 @@ Examples:
         help='Directory to save annotated images with bounding boxes (optional)'
     )
     
+    parser.add_argument(
+        '--save-embedding-viz',
+        action='store_true',
+        help='Save embedding visualization images to temp folder'
+    )
+    
+    parser.add_argument(
+        '--temp-dir',
+        help='Custom temporary directory for visualizations (default: auto-generated)'
+    )
+    
     return parser.parse_args()
 
 
@@ -721,12 +740,20 @@ if __name__ == "__main__":
             def custom_detect(img, white_threshold=args.white_threshold):
                 return original_detect(img, white_threshold)
             
-            # Process page with custom parameters
+            # Process page with custom parameters and visualization
             sections = []
             bboxes = custom_detect(image)
             
             if args.verbose:
                 print(f"  Found {len(bboxes)} colored regions")
+            
+            # Save color detection visualization if requested
+            if args.save_embedding_viz:
+                color_viz_path = detector.visualize_color_detection(
+                    image, bboxes, page_num, args.white_threshold
+                )
+                if args.verbose:
+                    print(f"  Color detection visualization: {color_viz_path}")
             
             for bbox_idx, bbox in enumerate(bboxes):
                 try:
@@ -763,6 +790,14 @@ if __name__ == "__main__":
                     )
                     sections.append(section)
                     
+                    # Save embedding visualization if requested
+                    if args.save_embedding_viz:
+                        embedding_viz_path = detector.visualize_embedding_processing(
+                            image, bbox, embedding, page_num, bbox_idx
+                        )
+                        if args.verbose:
+                            print(f"    Embedding visualization: {embedding_viz_path}")
+                    
                 except Exception as e:
                     print(f"Error processing bbox {bbox_idx} on page {page_num}: {e}")
                     print(f"  BBox: {bbox}")
@@ -795,6 +830,12 @@ if __name__ == "__main__":
             n_clusters = len(unique_labels) - (1 if -1 in labels else 0)
             n_noise = list(labels).count(-1)
             print(f"  Found {n_clusters} clusters with {n_noise} noise points")
+            
+            # Save clustering visualization if requested
+            if args.save_embedding_viz:
+                clustering_viz_path = detector.visualize_clustering_results(all_sections, labels)
+                if clustering_viz_path:
+                    print(f"  Clustering visualization saved: {clustering_viz_path}")
         
         # Create annotated images if requested
         if args.output_images:
@@ -890,3 +931,86 @@ if __name__ == "__main__":
             import traceback
             traceback.print_exc()
         sys.exit(1)
+    def visualize_color_detection(self, image: Image.Image, bboxes: List[Tuple[int, int, int, int]], 
+                                 page_num: int, white_threshold: int, save_dir: str = None) -> str:
+        """
+        Visualize the color detection process
+        
+        Args:
+            image: Original page image
+            bboxes: Detected bounding boxes
+            page_num: Page number
+            white_threshold: White threshold used
+            save_dir: Directory to save visualization
+            
+        Returns:
+            Path to saved visualization
+        """
+        if save_dir is None:
+            save_dir = self.temp_dir
+        
+        # Create figure with subplots
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        fig.suptitle(f'Color Detection Process - Page {page_num}', fontsize=16)
+        
+        # 1. Original image
+        axes[0, 0].imshow(image)
+        axes[0, 0].set_title('Original Page')
+        axes[0, 0].axis('off')
+        
+        # 2. Color detection mask
+        img_array = np.array(image)
+        if len(img_array.shape) == 3 and img_array.shape[2] >= 3:
+            # Create mask for non-white pixels
+            non_white_mask = np.any(img_array[:, :, :3] < white_threshold, axis=2)
+            axes[0, 1].imshow(non_white_mask, cmap='gray')
+            axes[0, 1].set_title(f'Non-White Mask\n(threshold={white_threshold})')
+        else:
+            axes[0, 1].text(0.5, 0.5, 'Cannot create mask\nfor this image format', 
+                           ha='center', va='center', transform=axes[0, 1].transAxes)
+            axes[0, 1].set_title('Mask Creation Failed')
+        axes[0, 1].axis('off')
+        
+        # 3. Detected regions with bounding boxes
+        axes[1, 0].imshow(image)
+        for i, (x1, y1, x2, y2) in enumerate(bboxes):
+            rect = Rectangle((x1, y1), x2-x1, y2-y1, linewidth=2, 
+                           edgecolor=plt.cm.tab10(i % 10), facecolor='none')
+            axes[1, 0].add_patch(rect)
+            # Add region number
+            axes[1, 0].text(x1+5, y1+15, str(i), color='white', fontweight='bold', 
+                          bbox=dict(boxstyle="round,pad=0.3", facecolor=plt.cm.tab10(i % 10)))
+        axes[1, 0].set_title(f'Detected Regions ({len(bboxes)} found)')
+        axes[1, 0].axis('off')
+        
+        # 4. Region size distribution
+        if bboxes:
+            areas = [(x2-x1)*(y2-y1) for x1, y1, x2, y2 in bboxes]
+            axes[1, 1].hist(areas, bins=min(10, len(areas)), alpha=0.7, edgecolor='black')
+            axes[1, 1].set_title('Region Area Distribution')
+            axes[1, 1].set_xlabel('Area (pixels²)')
+            axes[1, 1].set_ylabel('Count')
+            axes[1, 1].grid(True, alpha=0.3)
+            
+            # Add statistics
+            stats_text = f"""Statistics:
+Total regions: {len(bboxes)}
+Min area: {min(areas):,} px²
+Max area: {max(areas):,} px²
+Mean area: {np.mean(areas):,.0f} px²
+Median area: {np.median(areas):,.0f} px²"""
+            axes[1, 1].text(0.98, 0.98, stats_text, transform=axes[1, 1].transAxes,
+                           fontsize=9, verticalalignment='top', horizontalalignment='right',
+                           bbox=dict(boxstyle="round,pad=0.5", facecolor='white', alpha=0.8))
+        else:
+            axes[1, 1].text(0.5, 0.5, 'No regions detected', 
+                           ha='center', va='center', transform=axes[1, 1].transAxes)
+            axes[1, 1].set_title('No Data')
+        
+        # Save the visualization
+        output_path = os.path.join(save_dir, f'color_detection_p{page_num:03d}.png')
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        
+        return output_path
