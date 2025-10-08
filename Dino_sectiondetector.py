@@ -1,3 +1,6 @@
+import sys
+import os
+
 try:
     import torch
     import numpy as np
@@ -10,8 +13,6 @@ try:
     import cv2
     import argparse
     import json
-    import os
-    import sys
     import random
     import tempfile
     import matplotlib.pyplot as plt
@@ -155,7 +156,9 @@ class PDFSectionDetector:
             area = cv2.contourArea(contour)
             if area > min_area:
                 x, y, w, h = cv2.boundingRect(contour)
-                bboxes.append((x, y, x + w, y + h))
+                # Ensure all coordinates are Python integers
+                bbox = (int(x), int(y), int(x + w), int(y + h))
+                bboxes.append(bbox)
         
         return bboxes
     
