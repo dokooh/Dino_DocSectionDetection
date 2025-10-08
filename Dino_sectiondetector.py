@@ -62,7 +62,16 @@ class PDFSectionDetector:
         """Convert PDF pages to images"""
         print(f"Converting PDF to images (DPI: {dpi})...")
         images = pdf2image.convert_from_path(pdf_path, dpi=dpi)
-        return images
+        
+        # Ensure all images are in RGB mode
+        rgb_images = []
+        for i, img in enumerate(images):
+            if img.mode != 'RGB':
+                print(f"Converting page {i+1} from {img.mode} to RGB")
+                img = img.convert('RGB')
+            rgb_images.append(img)
+        
+        return rgb_images
     
     def detect_colored_regions(self, image: Image.Image, 
                                white_threshold: int = 240,
@@ -78,10 +87,40 @@ class PDFSectionDetector:
         Returns:
             List of bounding boxes (x1, y1, x2, y2) for colored regions
         """
-        img_array = np.array(image)
-        
-        # Create mask for non-white pixels
-        non_white_mask = np.any(img_array < white_threshold, axis=2).astype(np.uint8) * 255
+        try:
+            img_array = np.array(image)
+            
+            # Debug: Print image info
+            # print(f"Image shape: {img_array.shape}, dtype: {img_array.dtype}")
+            
+            # Ensure we have a 3-channel image (RGB)
+            if len(img_array.shape) == 2:
+                # Grayscale image - convert to RGB
+                img_array = np.stack([img_array] * 3, axis=-1)
+            elif len(img_array.shape) == 3 and img_array.shape[2] == 4:
+                # RGBA image - remove alpha channel
+                img_array = img_array[:, :, :3]
+            elif len(img_array.shape) == 3 and img_array.shape[2] != 3:
+                # Unexpected number of channels - force to RGB
+                if img_array.shape[2] == 1:
+                    img_array = np.repeat(img_array, 3, axis=2)
+                else:
+                    img_array = img_array[:, :, :3]
+            
+            # Ensure img_array has the right shape
+            if len(img_array.shape) != 3 or img_array.shape[2] != 3:
+                raise ValueError(f"Unexpected image array shape: {img_array.shape}")
+            
+            # Create mask for non-white pixels
+            # Check if any RGB channel is below threshold
+            non_white_mask = np.any(img_array < white_threshold, axis=2).astype(np.uint8) * 255
+            
+        except Exception as e:
+            print(f"Error in detect_colored_regions: {e}")
+            print(f"Image mode: {image.mode}, size: {image.size}")
+            if 'img_array' in locals():
+                print(f"Array shape: {img_array.shape}, dtype: {img_array.dtype}")
+            raise
         
         # Apply morphological operations to clean up
         kernel = np.ones((5, 5), np.uint8)
@@ -126,8 +165,27 @@ class PDFSectionDetector:
         """Get average color of a region"""
         x1, y1, x2, y2 = bbox
         region = np.array(image.crop((x1, y1, x2, y2)))
-        avg_color = region.mean(axis=(0, 1)).astype(int)
-        return tuple(avg_color)
+        
+        # Handle different image formats
+        if len(region.shape) == 2:
+            # Grayscale - return as RGB
+            avg_color = region.mean()
+            return (int(avg_color), int(avg_color), int(avg_color))
+        elif len(region.shape) == 3:
+            if region.shape[2] == 4:
+                # RGBA - use only RGB channels
+                region = region[:, :, :3]
+            # Calculate average color across spatial dimensions
+            avg_color = region.mean(axis=(0, 1)).astype(int)
+            # Ensure we have exactly 3 values
+            if len(avg_color) >= 3:
+                return tuple(avg_color[:3])
+            else:
+                # Fallback for unexpected cases
+                return (int(avg_color[0]), int(avg_color[0]), int(avg_color[0]))
+        else:
+            # Fallback for unexpected array shapes
+            return (128, 128, 128)  # Gray default
     
     def classify_section_type(self, bbox: Tuple[int, int, int, int], 
                              avg_color: Tuple[int, int, int],
@@ -619,30 +677,39 @@ if __name__ == "__main__":
             if args.verbose:
                 print(f"  Found {len(bboxes)} colored regions")
             
-            for bbox in bboxes:
-                # Filter by minimum area
-                x1, y1, x2, y2 = bbox
-                area = (x2 - x1) * (y2 - y1)
-                if area < args.min_area:
+            for bbox_idx, bbox in enumerate(bboxes):
+                try:
+                    # Filter by minimum area
+                    x1, y1, x2, y2 = bbox
+                    area = (x2 - x1) * (y2 - y1)
+                    if area < args.min_area:
+                        continue
+                    
+                    # Get embedding
+                    embedding = detector.get_region_embedding(image, bbox)
+                    
+                    # Get average color
+                    avg_color = detector.get_average_color(image, bbox)
+                    
+                    # Classify section type
+                    section_type = detector.classify_section_type(bbox, avg_color, image.width)
+                    
+                    section = Section(
+                        page_num=page_num,
+                        bbox=bbox,
+                        section_type=section_type,
+                        embedding=embedding,
+                        avg_color=avg_color
+                    )
+                    sections.append(section)
+                    
+                except Exception as e:
+                    print(f"Error processing bbox {bbox_idx} on page {page_num}: {e}")
+                    print(f"  BBox: {bbox}")
+                    if args.verbose:
+                        import traceback
+                        traceback.print_exc()
                     continue
-                
-                # Get embedding
-                embedding = detector.get_region_embedding(image, bbox)
-                
-                # Get average color
-                avg_color = detector.get_average_color(image, bbox)
-                
-                # Classify section type
-                section_type = detector.classify_section_type(bbox, avg_color, image.width)
-                
-                section = Section(
-                    page_num=page_num,
-                    bbox=bbox,
-                    section_type=section_type,
-                    embedding=embedding,
-                    avg_color=avg_color
-                )
-                sections.append(section)
             
             # Store sections for this page
             page_sections_map[page_num] = sections
