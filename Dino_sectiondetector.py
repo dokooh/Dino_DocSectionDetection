@@ -561,6 +561,287 @@ class PDFSectionDetector:
         
         return all_sections
 
+    def visualize_color_detection(self, image: Image.Image, bboxes: List[Tuple[int, int, int, int]], 
+                                 page_num: int, white_threshold: int, save_dir: str = None) -> str:
+        """
+        Visualize the color detection process
+        
+        Args:
+            image: Original page image
+            bboxes: Detected bounding boxes
+            page_num: Page number
+            white_threshold: White threshold used
+            save_dir: Directory to save visualization
+            
+        Returns:
+            Path to saved visualization
+        """
+        if save_dir is None:
+            save_dir = self.temp_dir
+        
+        # Create figure with subplots
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        fig.suptitle(f'Color Detection Process - Page {page_num}', fontsize=16)
+        
+        # 1. Original image
+        axes[0, 0].imshow(image)
+        axes[0, 0].set_title('Original Page')
+        axes[0, 0].axis('off')
+        
+        # 2. Color detection mask
+        img_array = np.array(image)
+        if len(img_array.shape) == 3 and img_array.shape[2] >= 3:
+            # Create mask for non-white pixels
+            non_white_mask = np.any(img_array[:, :, :3] < white_threshold, axis=2)
+            axes[0, 1].imshow(non_white_mask, cmap='gray')
+            axes[0, 1].set_title(f'Non-White Mask\n(threshold={white_threshold})')
+        else:
+            axes[0, 1].text(0.5, 0.5, 'Cannot create mask\nfor this image format', 
+                           ha='center', va='center', transform=axes[0, 1].transAxes)
+            axes[0, 1].set_title('Mask Creation Failed')
+        axes[0, 1].axis('off')
+        
+        # 3. Detected regions with bounding boxes
+        axes[1, 0].imshow(image)
+        for i, (x1, y1, x2, y2) in enumerate(bboxes):
+            rect = Rectangle((x1, y1), x2-x1, y2-y1, linewidth=2, 
+                           edgecolor=plt.cm.tab10(i % 10), facecolor='none')
+            axes[1, 0].add_patch(rect)
+            # Add region number
+            axes[1, 0].text(x1+5, y1+15, str(i), color='white', fontweight='bold', 
+                          bbox=dict(boxstyle="round,pad=0.3", facecolor=plt.cm.tab10(i % 10)))
+        axes[1, 0].set_title(f'Detected Regions ({len(bboxes)} found)')
+        axes[1, 0].axis('off')
+        
+        # 4. Region size distribution
+        if bboxes:
+            areas = [(x2-x1)*(y2-y1) for x1, y1, x2, y2 in bboxes]
+            axes[1, 1].hist(areas, bins=min(10, len(areas)), alpha=0.7, edgecolor='black')
+            axes[1, 1].set_title('Region Area Distribution')
+            axes[1, 1].set_xlabel('Area (pixels²)')
+            axes[1, 1].set_ylabel('Count')
+            axes[1, 1].grid(True, alpha=0.3)
+            
+            # Add statistics
+            stats_text = f"""Statistics:
+Total regions: {len(bboxes)}
+Min area: {min(areas):,} px²
+Max area: {max(areas):,} px²
+Mean area: {np.mean(areas):,.0f} px²
+Median area: {np.median(areas):,.0f} px²"""
+            axes[1, 1].text(0.98, 0.98, stats_text, transform=axes[1, 1].transAxes,
+                           fontsize=9, verticalalignment='top', horizontalalignment='right',
+                           bbox=dict(boxstyle="round,pad=0.5", facecolor='white', alpha=0.8))
+        else:
+            axes[1, 1].text(0.5, 0.5, 'No regions detected', 
+                           ha='center', va='center', transform=axes[1, 1].transAxes)
+            axes[1, 1].set_title('No Data')
+        
+        # Save the visualization
+        output_path = os.path.join(save_dir, f'color_detection_p{page_num:03d}.png')
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        
+        return output_path
+
+    def visualize_embedding_processing(self, image: Image.Image, bbox: Tuple[int, int, int, int], 
+                                     embedding: np.ndarray, page_num: int, bbox_idx: int, 
+                                     save_dir: str = None) -> str:
+        """
+        Visualize embedding processing for a specific region
+        
+        Args:
+            image: Original page image
+            bbox: Bounding box of the region
+            embedding: Computed embedding
+            page_num: Page number
+            bbox_idx: Index of the bounding box
+            save_dir: Directory to save visualization
+            
+        Returns:
+            Path to saved visualization
+        """
+        if save_dir is None:
+            save_dir = self.temp_dir
+        
+        x1, y1, x2, y2 = bbox
+        region = image.crop((x1, y1, x2, y2))
+        
+        # Create figure with subplots
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        fig.suptitle(f'Embedding Processing - Page {page_num}, Region {bbox_idx}', fontsize=14)
+        
+        # 1. Original image with bounding box
+        axes[0].imshow(image)
+        rect = Rectangle((x1, y1), x2-x1, y2-y1, linewidth=3, 
+                        edgecolor='red', facecolor='none')
+        axes[0].add_patch(rect)
+        axes[0].set_title('Original Image with ROI')
+        axes[0].axis('off')
+        
+        # 2. Cropped region
+        axes[1].imshow(region)
+        axes[1].set_title(f'Extracted Region\n{region.size[0]}x{region.size[1]} pixels')
+        axes[1].axis('off')
+        
+        # 3. Embedding visualization (first 64 dimensions as heatmap)
+        embedding_sample = embedding[:64].reshape(8, 8)
+        im = axes[2].imshow(embedding_sample, cmap='viridis', aspect='auto')
+        axes[2].set_title(f'Embedding Sample\n(first 64 of {len(embedding)} dims)')
+        axes[2].set_xlabel('Dimension')
+        axes[2].set_ylabel('Dimension')
+        plt.colorbar(im, ax=axes[2], fraction=0.046, pad=0.04)
+        
+        # Save the visualization
+        output_path = os.path.join(save_dir, f'embedding_p{page_num:03d}_r{bbox_idx:02d}.png')
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        
+        return output_path
+
+    def visualize_clustering_results(self, sections: List[Section], labels: List[int], 
+                                   save_dir: str = None) -> str:
+        """
+        Visualize clustering results
+        
+        Args:
+            sections: List of detected sections
+            labels: Cluster labels
+            save_dir: Directory to save visualization
+            
+        Returns:
+            Path to saved visualization or None if failed
+        """
+        if save_dir is None:
+            save_dir = self.temp_dir
+            
+        if len(sections) < 2:
+            print(f"Not enough sections for clustering visualization")
+            return None
+            
+        try:
+            from sklearn.decomposition import PCA
+            from sklearn.manifold import TSNE
+            
+            # Extract embeddings
+            embeddings = np.vstack([s.embedding for s in sections])
+            
+            # Create figure with subplots
+            fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+            fig.suptitle('Clustering Analysis', fontsize=16)
+            
+            # Prepare colors
+            unique_labels = set(labels)
+            colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
+            
+            # 1. PCA visualization
+            if embeddings.shape[1] > 2:
+                pca = PCA(n_components=2)
+                embeddings_2d = pca.fit_transform(embeddings)
+                
+                for label, color in zip(unique_labels, colors):
+                    if label == -1:
+                        # Noise points in black
+                        mask = np.array(labels) == label
+                        axes[0, 0].scatter(embeddings_2d[mask, 0], embeddings_2d[mask, 1], 
+                                         c='black', marker='x', s=50, label='Noise', alpha=0.6)
+                    else:
+                        mask = np.array(labels) == label
+                        axes[0, 0].scatter(embeddings_2d[mask, 0], embeddings_2d[mask, 1], 
+                                         c=[color], label=f'Cluster {label}', s=50, alpha=0.7)
+                
+                axes[0, 0].set_title(f'PCA Projection (Explained Variance: {pca.explained_variance_ratio_.sum():.2f})')
+                axes[0, 0].legend()
+                axes[0, 0].grid(True, alpha=0.3)
+            else:
+                axes[0, 0].text(0.5, 0.5, 'Dimensionality too low for PCA', ha='center', va='center', transform=axes[0, 0].transAxes)
+                axes[0, 0].set_title('PCA Projection')
+            
+            # 2. Cluster statistics
+            cluster_stats = {}
+            labels_array = np.array(labels)
+            for label in unique_labels:
+                count = np.sum(labels_array == label)
+                cluster_stats[label] = count
+            
+            cluster_labels_list = list(cluster_stats.keys())
+            cluster_counts = list(cluster_stats.values())
+            bars = axes[0, 1].bar(range(len(cluster_labels_list)), cluster_counts, 
+                                 color=['black' if l == -1 else colors[i] for i, l in enumerate(cluster_labels_list)])
+            axes[0, 1].set_xlabel('Cluster Label')
+            axes[0, 1].set_ylabel('Number of Sections')
+            axes[0, 1].set_title('Cluster Size Distribution')
+            axes[0, 1].set_xticks(range(len(cluster_labels_list)))
+            axes[0, 1].set_xticklabels([f'Noise' if l == -1 else f'C{l}' for l in cluster_labels_list])
+            axes[0, 1].grid(True, alpha=0.3)
+            
+            # 3. Section types by cluster
+            section_type_counts = {}
+            labels_array = np.array(labels)
+            for i, section in enumerate(sections):
+                cluster_label = labels_array[i] if i < len(labels_array) else -1
+                key = (cluster_label, section.section_type)
+                section_type_counts[key] = section_type_counts.get(key, 0) + 1
+            
+            # Create stacked bar chart
+            section_types = list(set(s.section_type for s in sections))
+            x_pos = range(len(cluster_labels_list))
+            bottom = np.zeros(len(cluster_labels_list))
+            
+            type_colors = {'section': 'red', 'subsection': 'green', 'table': 'blue'}
+            
+            for stype in section_types:
+                heights = []
+                for cluster_label in cluster_labels_list:
+                    count = section_type_counts.get((cluster_label, stype), 0)
+                    heights.append(count)
+                
+                axes[1, 0].bar(x_pos, heights, bottom=bottom, 
+                              label=stype.capitalize(), color=type_colors.get(stype, 'gray'))
+                bottom += heights
+            
+            axes[1, 0].set_xlabel('Cluster Label')
+            axes[1, 0].set_ylabel('Number of Sections')
+            axes[1, 0].set_title('Section Types by Cluster')
+            axes[1, 0].set_xticks(x_pos)
+            axes[1, 0].set_xticklabels([f'Noise' if l == -1 else f'C{l}' for l in cluster_labels_list])
+            axes[1, 0].legend()
+            axes[1, 0].grid(True, alpha=0.3)
+            
+            # 4. Embedding similarity heatmap (sample if too many)
+            max_samples = 20
+            if len(embeddings) > max_samples:
+                indices = np.random.choice(len(embeddings), max_samples, replace=False)
+                sample_embeddings = embeddings[indices]
+            else:
+                sample_embeddings = embeddings
+                
+            # Compute cosine similarity
+            from sklearn.metrics.pairwise import cosine_similarity
+            similarity_matrix = cosine_similarity(sample_embeddings)
+            
+            im = axes[1, 1].imshow(similarity_matrix, cmap='viridis', aspect='auto')
+            axes[1, 1].set_title(f'Embedding Similarity Matrix (n={len(sample_embeddings)})')
+            axes[1, 1].set_xlabel('Section Index')
+            axes[1, 1].set_ylabel('Section Index')
+            
+            # Add colorbar
+            plt.colorbar(im, ax=axes[1, 1], fraction=0.046, pad=0.04)
+            
+            # Save the visualization
+            output_path = os.path.join(save_dir, 'clustering_analysis.png')
+            plt.tight_layout()
+            plt.savefig(output_path, dpi=150, bbox_inches='tight')
+            plt.close()
+            
+            return output_path
+            
+        except Exception as e:
+            print(f"Error creating clustering visualization: {e}")
+            return None
+
 
 def parse_arguments():
     """Parse command line arguments"""
@@ -934,86 +1215,3 @@ if __name__ == "__main__":
             import traceback
             traceback.print_exc()
         sys.exit(1)
-    def visualize_color_detection(self, image: Image.Image, bboxes: List[Tuple[int, int, int, int]], 
-                                 page_num: int, white_threshold: int, save_dir: str = None) -> str:
-        """
-        Visualize the color detection process
-        
-        Args:
-            image: Original page image
-            bboxes: Detected bounding boxes
-            page_num: Page number
-            white_threshold: White threshold used
-            save_dir: Directory to save visualization
-            
-        Returns:
-            Path to saved visualization
-        """
-        if save_dir is None:
-            save_dir = self.temp_dir
-        
-        # Create figure with subplots
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-        fig.suptitle(f'Color Detection Process - Page {page_num}', fontsize=16)
-        
-        # 1. Original image
-        axes[0, 0].imshow(image)
-        axes[0, 0].set_title('Original Page')
-        axes[0, 0].axis('off')
-        
-        # 2. Color detection mask
-        img_array = np.array(image)
-        if len(img_array.shape) == 3 and img_array.shape[2] >= 3:
-            # Create mask for non-white pixels
-            non_white_mask = np.any(img_array[:, :, :3] < white_threshold, axis=2)
-            axes[0, 1].imshow(non_white_mask, cmap='gray')
-            axes[0, 1].set_title(f'Non-White Mask\n(threshold={white_threshold})')
-        else:
-            axes[0, 1].text(0.5, 0.5, 'Cannot create mask\nfor this image format', 
-                           ha='center', va='center', transform=axes[0, 1].transAxes)
-            axes[0, 1].set_title('Mask Creation Failed')
-        axes[0, 1].axis('off')
-        
-        # 3. Detected regions with bounding boxes
-        axes[1, 0].imshow(image)
-        for i, (x1, y1, x2, y2) in enumerate(bboxes):
-            rect = Rectangle((x1, y1), x2-x1, y2-y1, linewidth=2, 
-                           edgecolor=plt.cm.tab10(i % 10), facecolor='none')
-            axes[1, 0].add_patch(rect)
-            # Add region number
-            axes[1, 0].text(x1+5, y1+15, str(i), color='white', fontweight='bold', 
-                          bbox=dict(boxstyle="round,pad=0.3", facecolor=plt.cm.tab10(i % 10)))
-        axes[1, 0].set_title(f'Detected Regions ({len(bboxes)} found)')
-        axes[1, 0].axis('off')
-        
-        # 4. Region size distribution
-        if bboxes:
-            areas = [(x2-x1)*(y2-y1) for x1, y1, x2, y2 in bboxes]
-            axes[1, 1].hist(areas, bins=min(10, len(areas)), alpha=0.7, edgecolor='black')
-            axes[1, 1].set_title('Region Area Distribution')
-            axes[1, 1].set_xlabel('Area (pixels²)')
-            axes[1, 1].set_ylabel('Count')
-            axes[1, 1].grid(True, alpha=0.3)
-            
-            # Add statistics
-            stats_text = f"""Statistics:
-Total regions: {len(bboxes)}
-Min area: {min(areas):,} px²
-Max area: {max(areas):,} px²
-Mean area: {np.mean(areas):,.0f} px²
-Median area: {np.median(areas):,.0f} px²"""
-            axes[1, 1].text(0.98, 0.98, stats_text, transform=axes[1, 1].transAxes,
-                           fontsize=9, verticalalignment='top', horizontalalignment='right',
-                           bbox=dict(boxstyle="round,pad=0.5", facecolor='white', alpha=0.8))
-        else:
-            axes[1, 1].text(0.5, 0.5, 'No regions detected', 
-                           ha='center', va='center', transform=axes[1, 1].transAxes)
-            axes[1, 1].set_title('No Data')
-        
-        # Save the visualization
-        output_path = os.path.join(save_dir, f'color_detection_p{page_num:03d}.png')
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-        return output_path
