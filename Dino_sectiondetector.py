@@ -1,17 +1,36 @@
-import torch
-import numpy as np
-from PIL import Image, ImageDraw, ImageFont
-import pdf2image
-from transformers import AutoImageProcessor, AutoModel
-from sklearn.cluster import DBSCAN
-from dataclasses import dataclass
-from typing import List, Tuple
-import cv2
-import argparse
-import json
-import os
-import sys
-import random
+try:
+    import torch
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFont
+    import pdf2image
+    from transformers import AutoImageProcessor, AutoModel
+    from sklearn.cluster import DBSCAN
+    from dataclasses import dataclass
+    from typing import List, Tuple
+    import cv2
+    import argparse
+    import json
+    import os
+    import sys
+    import random
+except ImportError as e:
+    if "_ARRAY_API not found" in str(e) or "NumPy" in str(e):
+        print("❌ NumPy Compatibility Error Detected!")
+        print("=" * 50)
+        print("This error occurs when NumPy 2.x is installed but some")
+        print("dependencies were compiled with NumPy 1.x.")
+        print("\nQuick fixes:")
+        print("1. pip install -r requirements-stable.txt")
+        print("2. pip install 'numpy<2.0.0'")
+        print("3. Create a fresh virtual environment")
+        print("\nFor detailed instructions, see README.md")
+        print("=" * 50)
+        sys.exit(1)
+    else:
+        print(f"❌ Import Error: {e}")
+        print("\nPlease ensure all dependencies are installed:")
+        print("pip install -r requirements.txt")
+        sys.exit(1)
 
 @dataclass
 class Section:

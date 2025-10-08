@@ -57,9 +57,40 @@ cd Dino_DocSectionDetection
 ```
 
 2. Install Python dependencies:
+
+**Option A - Standard Installation:**
 ```bash
 pip install -r requirements.txt
 ```
+
+**Option B - If you encounter NumPy compatibility issues:**
+```bash
+pip install -r requirements-stable.txt
+```
+
+**Option C - Manual NumPy fix (if needed):**
+```bash
+# First, ensure NumPy 1.x is installed
+pip install "numpy<2.0.0"
+# Then install other requirements
+pip install -r requirements.txt
+```
+
+### NumPy Compatibility Note
+
+This project requires NumPy 1.x due to compatibility issues with some dependencies. If you encounter errors like:
+```
+AttributeError: _ARRAY_API not found
+```
+or
+```
+A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x
+```
+
+Use one of these solutions:
+- Use `requirements-stable.txt` for fixed versions
+- Downgrade NumPy: `pip install "numpy<2.0.0"`
+- Create a fresh virtual environment and install dependencies
 
 ## Usage
 
@@ -260,19 +291,37 @@ When using `output_json` parameter, results are saved in this format:
 
 ### Common Issues
 
-1. **"No module named 'pdf2image'"**
+1. **NumPy Compatibility Error (`_ARRAY_API not found`)**
+   ```bash
+   # Solution 1: Use stable requirements
+   pip install -r requirements-stable.txt
+   
+   # Solution 2: Downgrade NumPy
+   pip install "numpy<2.0.0"
+   
+   # Solution 3: Fresh environment
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   pip install -r requirements-stable.txt
+   ```
+
+2. **"No module named 'pdf2image'"**
    - Ensure poppler is installed and in PATH
    - Restart terminal after installation
 
-2. **CUDA out of memory**
+3. **CUDA out of memory**
    - Use smaller model: `facebook/dinov2-base`
    - Reduce DPI: `dpi=150`
    - Process pages individually
 
-3. **Poor detection results**
+4. **Poor detection results**
    - Adjust `white_threshold` parameter
    - Check PDF quality and color contrast
    - Try different DPI settings
+
+5. **Module import errors with transformers**
+   - Ensure you're using compatible versions from `requirements-stable.txt`
+   - Avoid mixing NumPy 1.x and 2.x in the same environment
 
 ## Contributing
 
