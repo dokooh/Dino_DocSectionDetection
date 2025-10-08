@@ -145,20 +145,35 @@ class PDFSectionDetector:
     def get_region_embedding(self, image: Image.Image, 
                             bbox: Tuple[int, int, int, int]) -> np.ndarray:
         """Extract DINO embedding for a specific region"""
-        x1, y1, x2, y2 = bbox
-        region = image.crop((x1, y1, x2, y2))
-        
-        # Process image
-        inputs = self.processor(images=region, return_tensors="pt")
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
-        
-        # Get embeddings
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            # Use CLS token embedding
-            embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()
-        
-        return embedding.flatten()
+        try:
+            x1, y1, x2, y2 = bbox
+            region = image.crop((x1, y1, x2, y2))
+            
+            # Ensure region is not empty
+            if region.size[0] == 0 or region.size[1] == 0:
+                raise ValueError(f"Empty region from bbox {bbox}")
+                
+            # Process image
+            inputs = self.processor(images=region, return_tensors="pt")
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            
+            # Get embeddings
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                # Use CLS token embedding
+                embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()
+            
+            # Ensure embedding is the right shape
+            embedding_flat = embedding.flatten()
+            if embedding_flat.size == 0:
+                raise ValueError("Empty embedding generated")
+                
+            return embedding_flat
+            
+        except Exception as e:
+            print(f"Error getting embedding for bbox {bbox}: {e}")
+            # Return a default embedding with the expected size (768 for dinov2-base)
+            return np.zeros(768, dtype=np.float32)
     
     def get_average_color(self, image: Image.Image, 
                          bbox: Tuple[int, int, int, int]) -> Tuple[int, int, int]:
@@ -176,13 +191,25 @@ class PDFSectionDetector:
                 # RGBA - use only RGB channels
                 region = region[:, :, :3]
             # Calculate average color across spatial dimensions
-            avg_color = region.mean(axis=(0, 1)).astype(int)
-            # Ensure we have exactly 3 values
-            if len(avg_color) >= 3:
-                return tuple(avg_color[:3])
+            avg_color = region.mean(axis=(0, 1))
+            
+            # Ensure we have a numpy array and convert to int
+            if isinstance(avg_color, np.ndarray):
+                avg_color = avg_color.astype(int)
+                # Ensure we have exactly 3 values
+                if avg_color.size >= 3:
+                    return tuple(avg_color.flatten()[:3])
+                elif avg_color.size == 1:
+                    val = int(avg_color.item())
+                    return (val, val, val)
+                else:
+                    # Handle 2 values or other unexpected cases
+                    vals = avg_color.flatten()
+                    return (int(vals[0]), int(vals[0] if len(vals) == 1 else vals[1]), int(vals[0]))
             else:
-                # Fallback for unexpected cases
-                return (int(avg_color[0]), int(avg_color[0]), int(avg_color[0]))
+                # Handle scalar values
+                val = int(avg_color)
+                return (val, val, val)
         else:
             # Fallback for unexpected array shapes
             return (128, 128, 128)  # Gray default
@@ -207,7 +234,12 @@ class PDFSectionDetector:
         aspect_ratio = width / height if height > 0 else 0
         
         # Color intensity (darker colors might indicate headers)
-        color_intensity = sum(avg_color) / 3
+        # Ensure avg_color is a tuple of ints, not numpy array
+        if isinstance(avg_color, (list, tuple)) and len(avg_color) >= 3:
+            color_intensity = sum(avg_color[:3]) / 3
+        else:
+            # Fallback for unexpected formats
+            color_intensity = 128  # Neutral gray
         
         # Heuristics for classification
         relative_width = width / image_width
@@ -274,10 +306,18 @@ class PDFSectionDetector:
             return []
         
         # Stack embeddings
-        embeddings = np.vstack([s.embedding for s in sections])
+        try:
+            embeddings = np.vstack([s.embedding for s in sections])
+        except ValueError as e:
+            print(f"Error stacking embeddings: {e}")
+            print(f"Embedding shapes: {[s.embedding.shape for s in sections[:5]]}")  # Show first 5
+            raise
         
         # Normalize embeddings
-        embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        # Avoid division by zero
+        norms[norms == 0] = 1
+        embeddings = embeddings / norms
         
         # Cluster using DBSCAN
         clustering = DBSCAN(eps=eps, min_samples=2, metric='cosine')
@@ -685,14 +725,23 @@ if __name__ == "__main__":
                     if area < args.min_area:
                         continue
                     
+                    if args.verbose:
+                        print(f"    Processing bbox {bbox_idx}: {bbox}")
+                    
                     # Get embedding
                     embedding = detector.get_region_embedding(image, bbox)
+                    if args.verbose:
+                        print(f"    Got embedding shape: {embedding.shape}")
                     
                     # Get average color
                     avg_color = detector.get_average_color(image, bbox)
+                    if args.verbose:
+                        print(f"    Got avg_color: {avg_color} (type: {type(avg_color)})")
                     
                     # Classify section type
                     section_type = detector.classify_section_type(bbox, avg_color, image.width)
+                    if args.verbose:
+                        print(f"    Classified as: {section_type}")
                     
                     section = Section(
                         page_num=page_num,
