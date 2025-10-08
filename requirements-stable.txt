@@ -1,29 +1,30 @@
 # Stable version requirements for maximum compatibility
 # Use this file if you encounter version conflicts
+# Compatible with Python 3.8-3.13
 
-# Core ML libraries with specific stable versions
-torch==2.1.0
-torchvision==0.16.0
-transformers==4.35.0
+# Core ML libraries - using latest versions that support Python 3.13
+torch>=2.0.0
+torchvision>=0.15.0
+transformers>=4.30.0
 
 # NumPy - constrained to 1.x for compatibility
-numpy==1.24.4
+numpy>=1.24.0,<2.0.0
 
-# Image processing
-pdf2image==3.1.0
-opencv-python==4.8.1.78
-Pillow==10.0.1
+# Image processing - using available versions
+pdf2image>=1.16.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
 
 # Machine learning
-scikit-learn==1.3.2
+scikit-learn>=1.3.0
 
 # System dependencies (may help with compatibility)
 packaging>=21.0
 typing-extensions>=4.0.0
 
 # Optional: Explicitly specify versions to avoid conflicts
-requests>=2.25.0,<3.0.0
-urllib3>=1.26.0,<2.0.0
+requests>=2.25.0
+urllib3>=1.26.0
 
 # Font support for better text rendering
 fonttools>=4.0.0

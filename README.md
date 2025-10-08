@@ -63,12 +63,17 @@ cd Dino_DocSectionDetection
 pip install -r requirements.txt
 ```
 
-**Option B - If you encounter NumPy compatibility issues:**
+**Option B - If you encounter version conflicts:**
 ```bash
 pip install -r requirements-stable.txt
 ```
 
-**Option C - Manual NumPy fix (if needed):**
+**Option C - Minimal installation (if both above fail):**
+```bash
+pip install -r requirements-minimal.txt
+```
+
+**Option D - Manual NumPy fix (if needed):**
 ```bash
 # First, ensure NumPy 1.x is installed
 pip install "numpy<2.0.0"
@@ -88,7 +93,8 @@ A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x
 ```
 
 Use one of these solutions:
-- Use `requirements-stable.txt` for fixed versions
+- Use `requirements-stable.txt` for compatible versions
+- Use `requirements-minimal.txt` for basic installation
 - Downgrade NumPy: `pip install "numpy<2.0.0"`
 - Create a fresh virtual environment and install dependencies
 
@@ -319,7 +325,21 @@ When using `output_json` parameter, results are saved in this format:
    - Check PDF quality and color contrast
    - Try different DPI settings
 
-5. **Module import errors with transformers**
+5. **Package version not found (e.g., pdf2image==3.1.0)**
+   ```bash
+   # Use requirements with correct versions
+   pip install -r requirements-stable.txt
+   
+   # Or install manually with correct version
+   pip install pdf2image>=1.16.0
+   ```
+
+6. **Python 3.13 compatibility issues**
+   - Some packages may not yet support Python 3.13
+   - Consider using Python 3.11 or 3.12 for better compatibility
+   - Use minimal requirements: `pip install -r requirements-minimal.txt`
+
+7. **Module import errors with transformers**
    - Ensure you're using compatible versions from `requirements-stable.txt`
    - Avoid mixing NumPy 1.x and 2.x in the same environment
 

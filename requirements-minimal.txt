@@ -1,0 +1,18 @@
+# Minimal requirements - use if standard installation fails
+# These are the absolute minimum packages needed
+
+# Core ML libraries - minimal versions
+torch
+torchvision  
+transformers
+
+# NumPy - force version 1.x
+"numpy<2.0.0"
+
+# Image processing - minimal versions
+pdf2image
+opencv-python
+Pillow
+
+# Machine learning
+scikit-learn

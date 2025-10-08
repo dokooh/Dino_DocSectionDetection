@@ -46,9 +46,17 @@ if %errorlevel%==0 (
     if %errorlevel%==0 (
         echo ✓ Stable installation successful
     ) else (
-        echo ❌ Installation failed
-        echo    Please check the error messages above
-        exit /b 1
+        echo ❌ Stable installation failed
+        echo    Trying minimal requirements...
+        
+        pip install -r requirements-minimal.txt
+        if %errorlevel%==0 (
+            echo ✓ Minimal installation successful
+        ) else (
+            echo ❌ All installation attempts failed
+            echo    Please check the error messages above
+            exit /b 1
+        )
     )
 )
 

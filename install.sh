@@ -41,9 +41,16 @@ else
     if pip install -r requirements-stable.txt; then
         echo "✓ Stable installation successful"
     else
-        echo "❌ Installation failed"
-        echo "   Please check the error messages above"
-        exit 1
+        echo "❌ Stable installation failed"
+        echo "   Trying minimal requirements..."
+        
+        if pip install -r requirements-minimal.txt; then
+            echo "✓ Minimal installation successful"
+        else
+            echo "❌ All installation attempts failed"
+            echo "   Please check the error messages above"
+            exit 1
+        fi
     fi
 fi
 
