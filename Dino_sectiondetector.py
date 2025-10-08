@@ -57,7 +57,16 @@ class PDFSectionDetector:
         self.processor = AutoImageProcessor.from_pretrained(model_name)
         self.model = AutoModel.from_pretrained(model_name).to(self.device)
         self.model.eval()
-        
+    
+    def _safe_int_conversion(self, value):
+        """Safely convert numpy scalar or other types to Python int"""
+        if hasattr(value, 'item'):  # numpy scalar
+            return int(value.item())
+        elif isinstance(value, (np.integer, np.floating)):
+            return int(value)
+        else:
+            return int(value)
+    
     def pdf_to_images(self, pdf_path: str, dpi: int = 300) -> List[Image.Image]:
         """Convert PDF pages to images"""
         print(f"Converting PDF to images (DPI: {dpi})...")
@@ -359,7 +368,9 @@ class PDFSectionDetector:
                     cluster_colors[label] = (128, 128, 128)  # Gray
                 else:
                     # Generate random bright colors for clusters
-                    random.seed(label)  # Consistent colors for same cluster
+                    # Convert numpy scalar to Python int for random.seed()
+                    seed_value = int(label) if hasattr(label, 'item') else label
+                    random.seed(seed_value)  # Consistent colors for same cluster
                     cluster_colors[label] = (
                         random.randint(100, 255),
                         random.randint(100, 255),
