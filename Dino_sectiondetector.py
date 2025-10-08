@@ -352,7 +352,7 @@ class PDFSectionDetector:
         
         # Generate colors for clusters if labels are provided
         cluster_colors = {}
-        if labels:
+        if labels is not None and len(labels) > 0:  # Fix: Proper array check
             unique_labels = set(labels)
             for label in unique_labels:
                 if label == -1:  # Noise points
@@ -380,7 +380,7 @@ class PDFSectionDetector:
             x1, y1, x2, y2 = section.bbox
             
             # Choose color based on cluster or section type
-            if labels and i < len(labels):
+            if labels is not None and len(labels) > 0 and i < len(labels):  # Fix: Proper array check
                 color = cluster_colors.get(labels[i], (255, 255, 255))
                 label_text = f"C{labels[i]}" if labels[i] != -1 else "N"
             else:
@@ -528,7 +528,7 @@ class PDFSectionDetector:
                         'type': s.section_type,
                         'color': s.avg_color,
                         'embedding': s.embedding.tolist(),
-                        'cluster': labels[i] if i < len(labels) else -1
+                        'cluster': labels[i] if len(labels) > 0 and i < len(labels) else -1  # Fix: Proper array check
                     }
                     for i, s in enumerate(all_sections)
                 ]
@@ -797,7 +797,7 @@ if __name__ == "__main__":
                 if page_sections:
                     # Get labels for sections on this page
                     page_labels = []
-                    if labels:
+                    if len(labels) > 0:  # Fix: Use len() instead of direct truthiness check
                         page_labels = labels[section_idx:section_idx + len(page_sections)]
                     
                     # Create annotated image
@@ -850,7 +850,7 @@ if __name__ == "__main__":
                     'type': s.section_type,
                     'color': s.avg_color,
                     'embedding': s.embedding.tolist(),
-                    'cluster': labels[i] if i < len(labels) else -1
+                    'cluster': labels[i] if len(labels) > 0 and i < len(labels) else -1  # Fix: Proper array check
                 }
                 for i, s in enumerate(all_sections)
             ]
