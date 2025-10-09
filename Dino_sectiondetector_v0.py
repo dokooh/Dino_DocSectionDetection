@@ -68,6 +68,21 @@ class PDFSectionDetector:
         else:
             return int(value)
     
+    def _ensure_json_serializable(self, obj):
+        """Ensure object is JSON serializable by converting numpy types to native Python types"""
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (list, tuple)):
+            return [self._ensure_json_serializable(item) for item in obj]
+        elif isinstance(obj, dict):
+            return {key: self._ensure_json_serializable(value) for key, value in obj.items()}
+        else:
+            return obj
+    
     def _filter_small_bboxes(self, bboxes: List[Tuple[int, int, int, int]], 
                             min_width: int = 50, min_height: int = 20) -> List[Tuple[int, int, int, int]]:
         """
@@ -567,22 +582,22 @@ class PDFSectionDetector:
             data = {
                 'metadata': {
                     'input_file': pdf_path,
-                    'dpi': dpi,
-                    'white_threshold': white_threshold,
-                    'min_area': min_area,
-                    'clustering_eps': eps,
+                    'dpi': int(dpi),
+                    'white_threshold': int(white_threshold),
+                    'min_area': int(min_area),
+                    'clustering_eps': float(eps),
                     'clustering_enabled': enable_clustering,
                     'total_pages': len(images),
                     'total_sections': len(all_sections)
                 },
                 'sections': [
                     {
-                        'page': s.page_num,
-                        'bbox': s.bbox,
+                        'page': int(s.page_num),
+                        'bbox': [int(coord) for coord in s.bbox],  # Convert all bbox coordinates to int
                         'type': s.section_type,
-                        'color': s.avg_color,
+                        'color': [int(c) for c in s.avg_color],  # Convert all color values to int
                         'embedding': s.embedding.tolist(),
-                        'cluster': labels[i] if len(labels) > 0 and i < len(labels) else -1  # Fix: Proper array check
+                        'cluster': int(labels[i]) if len(labels) > 0 and i < len(labels) and labels[i] != -1 else -1
                     }
                     for i, s in enumerate(all_sections)
                 ]
@@ -914,24 +929,24 @@ if __name__ == "__main__":
             'metadata': {
                 'input_file': args.input_pdf,
                 'model': args.model,
-                'dpi': args.dpi,
-                'white_threshold': args.white_threshold,
-                'min_area': args.min_area,
-                'min_width': args.min_width,
-                'min_height': args.min_height,
-                'clustering_eps': args.eps,
+                'dpi': int(args.dpi),
+                'white_threshold': int(args.white_threshold),
+                'min_area': int(args.min_area),
+                'min_width': int(args.min_width),
+                'min_height': int(args.min_height),
+                'clustering_eps': float(args.eps),
                 'clustering_enabled': not args.no_clustering,
                 'total_pages': len(images),
                 'total_sections': len(all_sections)
             },
             'sections': [
                 {
-                    'page': s.page_num,
-                    'bbox': s.bbox,
+                    'page': int(s.page_num),
+                    'bbox': [int(coord) for coord in s.bbox],  # Convert all bbox coordinates to int
                     'type': s.section_type,
-                    'color': s.avg_color,
+                    'color': [int(c) for c in s.avg_color],  # Convert all color values to int
                     'embedding': s.embedding.tolist(),
-                    'cluster': labels[i] if len(labels) > 0 and i < len(labels) else -1  # Fix: Proper array check
+                    'cluster': int(labels[i]) if len(labels) > 0 and i < len(labels) and labels[i] != -1 else -1
                 }
                 for i, s in enumerate(all_sections)
             ]
