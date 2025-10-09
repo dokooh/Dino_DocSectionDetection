@@ -1,3 +1,6 @@
+import sys
+import os
+
 try:
     import torch
     import numpy as np
@@ -10,8 +13,6 @@ try:
     import cv2
     import argparse
     import json
-    import os
-    import sys
     import random
 except ImportError as e:
     if "_ARRAY_API not found" in str(e) or "NumPy" in str(e):
@@ -67,6 +68,38 @@ class PDFSectionDetector:
         else:
             return int(value)
     
+    def _filter_small_bboxes(self, bboxes: List[Tuple[int, int, int, int]], 
+                            min_width: int = 50, min_height: int = 20) -> List[Tuple[int, int, int, int]]:
+        """
+        Filter out bounding boxes that are too small in width or height
+        
+        Args:
+            bboxes: List of bounding boxes (x1, y1, x2, y2)
+            min_width: Minimum width threshold in pixels
+            min_height: Minimum height threshold in pixels
+            
+        Returns:
+            Filtered list of bounding boxes
+        """
+        filtered_bboxes = []
+        removed_count = 0
+        
+        for bbox in bboxes:
+            x1, y1, x2, y2 = bbox
+            width = x2 - x1
+            height = y2 - y1
+            
+            # Keep bounding boxes that meet minimum size requirements
+            if width >= min_width and height >= min_height:
+                filtered_bboxes.append(bbox)
+            else:
+                removed_count += 1
+        
+        if removed_count > 0:
+            print(f"  Removed {removed_count} small bounding boxes (min_width={min_width}, min_height={min_height})")
+        
+        return filtered_bboxes
+    
     def pdf_to_images(self, pdf_path: str, dpi: int = 300) -> List[Image.Image]:
         """Convert PDF pages to images"""
         print(f"Converting PDF to images (DPI: {dpi})...")
@@ -84,7 +117,9 @@ class PDFSectionDetector:
     
     def detect_colored_regions(self, image: Image.Image, 
                                white_threshold: int = 240,
-                               min_area: int = 1000) -> List[Tuple[int, int, int, int]]:
+                               min_area: int = 1000,
+                               min_width: int = 50,
+                               min_height: int = 20) -> List[Tuple[int, int, int, int]]:
         """
         Detect non-white (colored) regions in the image
         
@@ -92,6 +127,8 @@ class PDFSectionDetector:
             image: PIL Image
             white_threshold: Pixels with all RGB values above this are considered white
             min_area: Minimum area to filter noise
+            min_width: Minimum width for bounding boxes in pixels
+            min_height: Minimum height for bounding boxes in pixels
             
         Returns:
             List of bounding boxes (x1, y1, x2, y2) for colored regions
@@ -147,9 +184,14 @@ class PDFSectionDetector:
             area = cv2.contourArea(contour)
             if area > min_area:
                 x, y, w, h = cv2.boundingRect(contour)
-                bboxes.append((x, y, x + w, y + h))
+                # Ensure all coordinates are Python integers
+                bbox = (int(x), int(y), int(x + w), int(y + h))
+                bboxes.append(bbox)
         
-        return bboxes
+        # Post-processing: Remove small bounding boxes based on dimensions
+        filtered_bboxes = self._filter_small_bboxes(bboxes, min_width=min_width, min_height=min_height)
+        
+        return filtered_bboxes
     
     def get_region_embedding(self, image: Image.Image, 
                             bbox: Tuple[int, int, int, int]) -> np.ndarray:
@@ -269,12 +311,13 @@ class PDFSectionDetector:
             return 'subsection'
     
     def process_page(self, image: Image.Image, page_num: int, 
-                     white_threshold: int = 240, min_area: int = 1000) -> List[Section]:
+                     white_threshold: int = 240, min_area: int = 1000,
+                     min_width: int = 50, min_height: int = 20) -> List[Section]:
         """Process a single page and detect sections"""
         print(f"Processing page {page_num}...")
         
         # Detect colored regions
-        bboxes = self.detect_colored_regions(image, white_threshold, min_area)
+        bboxes = self.detect_colored_regions(image, white_threshold, min_area, min_width, min_height)
         print(f"  Found {len(bboxes)} colored regions")
         
         sections = []
@@ -562,6 +605,7 @@ Examples:
   python Dino_sectiondetector.py document.pdf -o results.json
   python Dino_sectiondetector.py document.pdf -m facebook/dinov2-large --dpi 150
   python Dino_sectiondetector.py document.pdf --white-threshold 220 --eps 0.3
+  python Dino_sectiondetector.py document.pdf --min-width 100 --min-height 30
   python Dino_sectiondetector.py document.pdf --output-images ./annotated/ --verbose
         """
     )
@@ -605,6 +649,20 @@ Examples:
         type=int,
         default=1000,
         help='Minimum area for region detection (default: 1000)'
+    )
+    
+    parser.add_argument(
+        '--min-width',
+        type=int,
+        default=50,
+        help='Minimum width for bounding boxes in pixels (default: 50)'
+    )
+    
+    parser.add_argument(
+        '--min-height',
+        type=int,
+        default=20,
+        help='Minimum height for bounding boxes in pixels (default: 20)'
     )
     
     parser.add_argument(
@@ -667,6 +725,12 @@ def validate_arguments(args):
     if args.min_area < 100:
         print("Warning: Very small min-area may result in noise detection.")
     
+    if args.min_width < 10:
+        print("Warning: Very small min-width may not filter effectively.")
+    
+    if args.min_height < 5:
+        print("Warning: Very small min-height may not filter effectively.")
+    
     # Create save_images directory if specified
     if args.save_images:
         os.makedirs(args.save_images, exist_ok=True)
@@ -692,6 +756,8 @@ if __name__ == "__main__":
     print(f"  DPI: {args.dpi}")
     print(f"  White threshold: {args.white_threshold}")
     print(f"  Min area: {args.min_area}")
+    print(f"  Min width: {args.min_width}")
+    print(f"  Min height: {args.min_height}")
     print(f"  Clustering eps: {args.eps}")
     print(f"  Skip clustering: {args.no_clustering}")
     if args.save_images:
@@ -718,8 +784,10 @@ if __name__ == "__main__":
             
             # Override detection parameters
             original_detect = detector.detect_colored_regions
-            def custom_detect(img, white_threshold=args.white_threshold):
-                return original_detect(img, white_threshold)
+            def custom_detect(img, white_threshold=args.white_threshold, 
+                            min_area=args.min_area, min_width=args.min_width, 
+                            min_height=args.min_height):
+                return original_detect(img, white_threshold, min_area, min_width, min_height)
             
             # Process page with custom parameters
             sections = []
@@ -849,6 +917,8 @@ if __name__ == "__main__":
                 'dpi': args.dpi,
                 'white_threshold': args.white_threshold,
                 'min_area': args.min_area,
+                'min_width': args.min_width,
+                'min_height': args.min_height,
                 'clustering_eps': args.eps,
                 'clustering_enabled': not args.no_clustering,
                 'total_pages': len(images),
