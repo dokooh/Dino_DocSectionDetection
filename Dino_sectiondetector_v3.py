@@ -14,6 +14,9 @@ try:
     import argparse
     import json
     import random
+    import warnings
+    # For DINOv3 models from facebookresearch
+    import torchvision.transforms as T
 except ImportError as e:
     if "_ARRAY_API not found" in str(e) or "NumPy" in str(e):
         print("❌ NumPy Compatibility Error Detected!")
@@ -43,7 +46,7 @@ class Section:
     avg_color: Tuple[int, int, int]
 
 class PDFSectionDetector:
-    def __init__(self, model_name='facebook/dinov3-base'):
+    def __init__(self, model_name='facebook/dinov3-base', hf_token=None):
         """
         Initialize the PDF section detector with DINOv3
         
@@ -53,11 +56,20 @@ class PDFSectionDetector:
                        - facebook/dinov3-base (default)
                        - facebook/dinov3-large 
                        - facebook/dinov3-giant
+            hf_token: HuggingFace authentication token for private repositories
+                     Can also be set via HF_TOKEN environment variable
                        
         Note: DINOv3 offers improved performance and efficiency over DINOv2
         """
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Using device: {self.device}")
+        
+        # Handle HuggingFace token
+        self.hf_token = hf_token or os.getenv('HF_TOKEN')
+        if self.hf_token:
+            print("🔑 Using HuggingFace authentication token")
+        else:
+            print("ℹ️  No HuggingFace token provided (using public access)")
         
         # Validate DINOv3 model name
         valid_dinov3_models = [
@@ -75,9 +87,16 @@ class PDFSectionDetector:
         print(f"Loading DINOv3 model: {model_name}")
         
         try:
-            # Load DINOv3 model and processor
-            self.processor = AutoImageProcessor.from_pretrained(model_name)
-            self.model = AutoModel.from_pretrained(model_name).to(self.device)
+            # Load DINOv3 model and processor with token authentication
+            if self.hf_token:
+                print("🔐 Loading model with authentication...")
+                self.processor = AutoImageProcessor.from_pretrained(model_name, token=self.hf_token)
+                self.model = AutoModel.from_pretrained(model_name, token=self.hf_token).to(self.device)
+            else:
+                print("🌐 Loading model with public access...")
+                self.processor = AutoImageProcessor.from_pretrained(model_name)
+                self.model = AutoModel.from_pretrained(model_name).to(self.device)
+            
             self.model.eval()
             
             # Get embedding dimension for DINOv3 models
@@ -86,19 +105,38 @@ class PDFSectionDetector:
             
         except Exception as e:
             print(f"❌ Error loading DINOv3 model '{model_name}': {e}")
+            
+            # Check if it's an authentication issue
+            if "401" in str(e) or "authentication" in str(e).lower():
+                print("\n🔐 Authentication Error Detected!")
+                print("This model might require authentication. Try:")
+                print("1. Provide a HuggingFace token: --hf-token YOUR_TOKEN")
+                print("2. Set environment variable: export HF_TOKEN=YOUR_TOKEN")
+                print("3. Login via CLI: huggingface-cli login")
+                
             print("\nThis might be because:")
             print("1. The model is not yet available on HuggingFace")
-            print("2. You need to update transformers: pip install --upgrade transformers")
-            print("3. Network connectivity issues")
+            print("2. The model requires authentication")
+            print("3. You need to update transformers: pip install --upgrade transformers")
+            print("4. Network connectivity issues")
             print("\nFalling back to DINOv2-base as backup...")
             
             # Fallback to DINOv2
             fallback_model = 'facebook/dinov2-base'
-            self.processor = AutoImageProcessor.from_pretrained(fallback_model)
-            self.model = AutoModel.from_pretrained(fallback_model).to(self.device)
-            self.model.eval()
-            self.embedding_dim = 768
-            print(f"Using fallback model: {fallback_model}")
+            try:
+                if self.hf_token:
+                    self.processor = AutoImageProcessor.from_pretrained(fallback_model, token=self.hf_token)
+                    self.model = AutoModel.from_pretrained(fallback_model, token=self.hf_token).to(self.device)
+                else:
+                    self.processor = AutoImageProcessor.from_pretrained(fallback_model)
+                    self.model = AutoModel.from_pretrained(fallback_model).to(self.device)
+                
+                self.model.eval()
+                self.embedding_dim = 768
+                print(f"✅ Using fallback model: {fallback_model}")
+            except Exception as fallback_error:
+                print(f"❌ Fallback model also failed: {fallback_error}")
+                sys.exit(1)
         
         self.model_name = model_name
     
@@ -660,85 +698,6 @@ class PDFSectionDetector:
                 draw.text((legend_x + 20, item_y - 2), text, fill=(0, 0, 0), font=font)
             else:
                 draw.text((legend_x + 20, item_y - 2), text, fill=(0, 0, 0))
-    
-    def process_pdf(self, pdf_path: str, output_json: str = None, 
-                    dpi: int = 300, white_threshold: int = 240, 
-                    min_area: int = 1000, eps: float = 0.3,
-                    enable_clustering: bool = True) -> List[Section]:
-        """
-        Process entire PDF document using DINOv3
-        
-        Args:
-            pdf_path: Path to PDF file
-            output_json: Optional path to save results as JSON
-            dpi: DPI for PDF to image conversion
-            white_threshold: White pixel threshold for region detection
-            min_area: Minimum area for region detection
-            eps: DBSCAN epsilon parameter for clustering (adjusted for DINOv3)
-            enable_clustering: Whether to perform similarity clustering
-            
-        Returns:
-            List of all detected sections
-        """
-        print(f"🚀 Starting PDF processing with DINOv3 ({self.model_name})")
-        
-        # Convert PDF to images
-        images = self.pdf_to_images(pdf_path, dpi)
-        
-        # Process each page
-        all_sections = []
-        for page_num, image in enumerate(images, start=1):
-            sections = self.process_page(image, page_num, white_threshold, min_area)
-            all_sections.extend(sections)
-        
-        print(f"\n✅ Total sections found with DINOv3: {len(all_sections)}")
-        
-        # Cluster similar sections
-        labels = []
-        if enable_clustering and len(all_sections) > 0:
-            labels = self.cluster_similar_sections(all_sections, eps)
-            
-            # Print summary
-            print("\nDINOv3 Section Summary:")
-            for i, section in enumerate(all_sections):
-                cluster_id = labels[i] if i < len(labels) else -1
-                print(f"Page {section.page_num}, {section.section_type.upper()}: "
-                      f"BBox={section.bbox}, Color={section.avg_color}, "
-                      f"Cluster={cluster_id}")
-        
-        # Optionally save to JSON
-        if output_json:
-            data = {
-                'metadata': {
-                    'input_file': pdf_path,
-                    'model': self.model_name,
-                    'model_type': 'DINOv3',
-                    'embedding_dimension': self.embedding_dim,
-                    'dpi': int(dpi),
-                    'white_threshold': int(white_threshold),
-                    'min_area': int(min_area),
-                    'clustering_eps': float(eps),
-                    'clustering_enabled': enable_clustering,
-                    'total_pages': len(images),
-                    'total_sections': len(all_sections)
-                },
-                'sections': [
-                    {
-                        'page': int(s.page_num),
-                        'bbox': [int(coord) for coord in s.bbox],  # Convert all bbox coordinates to int
-                        'type': s.section_type,
-                        'color': [int(c) for c in s.avg_color],  # Convert all color values to int
-                        'embedding': s.embedding.tolist(),
-                        'cluster': int(labels[i]) if len(labels) > 0 and i < len(labels) and labels[i] != -1 else -1
-                    }
-                    for i, s in enumerate(all_sections)
-                ]
-            }
-            with open(output_json, 'w') as f:
-                json.dump(data, f, indent=2)
-            print(f"\n💾 DINOv3 results saved to {output_json}")
-        
-        return all_sections
 
 
 def parse_arguments():
@@ -747,12 +706,17 @@ def parse_arguments():
         description="PDF Section Detection using DINOv3 embeddings",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+HuggingFace Authentication:
+  --hf-token TOKEN      HuggingFace authentication token for private models
+  Or set environment variable: export HF_TOKEN=your_token_here
+  Or login via CLI: huggingface-cli login
+
 Examples:
   python Dino_sectiondetector_v3.py document.pdf
+  python Dino_sectiondetector_v3.py document.pdf --hf-token hf_xxxxxxxxxxxxx
   python Dino_sectiondetector_v3.py document.pdf -o results.json
   python Dino_sectiondetector_v3.py document.pdf -m facebook/dinov3-large --dpi 150
   python Dino_sectiondetector_v3.py document.pdf --white-threshold 220 --eps 0.2
-  python Dino_sectiondetector_v3.py document.pdf --min-width 100 --min-height 30
   python Dino_sectiondetector_v3.py document.pdf --output-images ./annotated_v3/ --verbose
         """
     )
@@ -775,6 +739,11 @@ Examples:
         default='facebook/dinov3-base',
         choices=['facebook/dinov3-base', 'facebook/dinov3-large', 'facebook/dinov3-giant'],
         help='DINOv3 model to use (default: facebook/dinov3-base)'
+    )
+    
+    parser.add_argument(
+        '--hf-token',
+        help='HuggingFace authentication token (can also use HF_TOKEN env var)'
     )
     
     parser.add_argument(
@@ -861,6 +830,13 @@ def validate_arguments(args):
         base_name = os.path.splitext(os.path.basename(args.input_pdf))[0]
         args.output = f"{base_name}_sections_v3.json"
     
+    # Validate HuggingFace token format if provided
+    if args.hf_token:
+        if not args.hf_token.startswith(('hf_', 'hf-')):
+            print("⚠️  Warning: HuggingFace tokens typically start with 'hf_'")
+        if len(args.hf_token) < 20:
+            print("⚠️  Warning: HuggingFace token seems unusually short")
+    
     # Validate parameter ranges
     if not 0 <= args.white_threshold <= 255:
         print("Error: white-threshold must be between 0 and 255.")
@@ -878,11 +854,10 @@ def validate_arguments(args):
     if args.min_height < 5:
         print("Warning: Very small min-height may not filter effectively.")
     
-    # Create save_images directory if specified
+    # Create directories if specified
     if args.save_images:
         os.makedirs(args.save_images, exist_ok=True)
     
-    # Create output_images directory if specified
     if args.output_images:
         os.makedirs(args.output_images, exist_ok=True)
     
@@ -900,6 +875,12 @@ if __name__ == "__main__":
     print(f"  Input PDF: {args.input_pdf}")
     print(f"  Output JSON: {args.output}")
     print(f"  DINOv3 Model: {args.model}")
+    if args.hf_token:
+        # Mask token for security (show only first and last 4 characters)
+        masked_token = args.hf_token[:4] + "*" * (len(args.hf_token) - 8) + args.hf_token[-4:]
+        print(f"  HuggingFace Token: {masked_token}")
+    else:
+        print(f"  HuggingFace Token: Not provided (using public access)")
     print(f"  DPI: {args.dpi}")
     print(f"  White threshold: {args.white_threshold}")
     print(f"  Min area: {args.min_area}")
@@ -914,9 +895,9 @@ if __name__ == "__main__":
     print("=" * 60)
     
     try:
-        # Initialize DINOv3 detector
+        # Initialize DINOv3 detector with token
         print(f"🔥 Initializing DINOv3 detector...")
-        detector = PDFSectionDetector(model_name=args.model)
+        detector = PDFSectionDetector(model_name=args.model, hf_token=args.hf_token)
         
         # Convert PDF to images
         images = detector.pdf_to_images(args.input_pdf, dpi=args.dpi)
@@ -1059,6 +1040,7 @@ if __name__ == "__main__":
                 'model': args.model,
                 'model_type': 'DINOv3',
                 'embedding_dimension': detector.embedding_dim,
+                'authenticated': bool(args.hf_token),
                 'dpi': int(args.dpi),
                 'white_threshold': int(args.white_threshold),
                 'min_area': int(args.min_area),
