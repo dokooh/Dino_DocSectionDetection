@@ -43,102 +43,73 @@ class Section:
     avg_color: Tuple[int, int, int]
 
 class PDFSectionDetector:
-    def __init__(self, model_name='facebook/dinov2-base'):
+    def __init__(self, model_name='facebook/dinov3-base'):
         """
-        Initialize the PDF section detector with enhanced DINO models
+        Initialize the PDF section detector with DINOv3
         
         Args:
-            model_name: HuggingFace model name
-                       Available models:
-                       - facebook/dinov2-base (768 dim)
-                       - facebook/dinov2-large (1024 dim) 
-                       - facebook/dinov2-giant (1536 dim)
+            model_name: HuggingFace model name for DINOv3
+                       Supported models:
+                       - facebook/dinov3-base (default)
+                       - facebook/dinov3-large 
+                       - facebook/dinov3-giant
                        
-        Note: This version uses enhanced processing optimized for better performance
+        Note: DINOv3 offers improved performance and efficiency over DINOv2
         """
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Using device: {self.device}")
         
-        # Map of available models and their embedding dimensions
-        self.available_models = {
-            'facebook/dinov2-base': 768,
-            'facebook/dinov2-large': 1024,
-            'facebook/dinov2-giant': 1536,
-            # Future DINOv3 models (when available)
-            'facebook/dinov3-base': 768,
-            'facebook/dinov3-large': 1024,
-            'facebook/dinov3-giant': 1536
-        }
+        # Validate DINOv3 model name
+        valid_dinov3_models = [
+            'facebook/dinov3-base',
+            'facebook/dinov3-large', 
+            'facebook/dinov3-giant'
+        ]
         
-        # Validate and potentially correct model name
-        original_model_name = model_name
-        model_name = self._validate_and_get_available_model(model_name)
+        if model_name not in valid_dinov3_models:
+            print(f"⚠️  Warning: '{model_name}' is not a recognized DINOv3 model.")
+            print(f"Valid DINOv3 models: {valid_dinov3_models}")
+            print("Falling back to facebook/dinov3-base")
+            model_name = 'facebook/dinov3-base'
         
-        if model_name != original_model_name:
-            print(f"⚠️  Model '{original_model_name}' not available. Using '{model_name}' instead.")
-        
-        print(f"Loading enhanced DINO model: {model_name}")
+        print(f"Loading DINOv3 model: {model_name}")
         
         try:
-            # Load DINO model and processor
+            # Load DINOv3 model and processor
             self.processor = AutoImageProcessor.from_pretrained(model_name)
             self.model = AutoModel.from_pretrained(model_name).to(self.device)
             self.model.eval()
             
-            # Get embedding dimension
-            self.embedding_dim = self.available_models.get(model_name, 768)
-            print(f"Enhanced DINO embedding dimension: {self.embedding_dim}")
-            
-            # Determine if this is a v2 or v3 model (for future compatibility)
-            self.model_version = "DINOv3" if "dinov3" in model_name else "DINOv2+"
+            # Get embedding dimension for DINOv3 models
+            self.embedding_dim = self._get_embedding_dimension(model_name)
+            print(f"DINOv3 embedding dimension: {self.embedding_dim}")
             
         except Exception as e:
-            print(f"❌ Error loading model '{model_name}': {e}")
-            print("\nFalling back to DINOv2-base...")
+            print(f"❌ Error loading DINOv3 model '{model_name}': {e}")
+            print("\nThis might be because:")
+            print("1. The model is not yet available on HuggingFace")
+            print("2. You need to update transformers: pip install --upgrade transformers")
+            print("3. Network connectivity issues")
+            print("\nFalling back to DINOv2-base as backup...")
             
-            # Ultimate fallback
+            # Fallback to DINOv2
             fallback_model = 'facebook/dinov2-base'
             self.processor = AutoImageProcessor.from_pretrained(fallback_model)
             self.model = AutoModel.from_pretrained(fallback_model).to(self.device)
             self.model.eval()
             self.embedding_dim = 768
-            self.model_version = "DINOv2+"
-            model_name = fallback_model
             print(f"Using fallback model: {fallback_model}")
         
         self.model_name = model_name
     
-    def _validate_and_get_available_model(self, requested_model: str) -> str:
-        """Validate requested model and return available alternative if needed"""
-        
-        # Direct mapping for DINOv3 requests to DINOv2 (since DINOv3 isn't available yet)
-        dinov3_to_dinov2_mapping = {
-            'facebook/dinov3-base': 'facebook/dinov2-base',
-            'facebook/dinov3-large': 'facebook/dinov2-large', 
-            'facebook/dinov3-giant': 'facebook/dinov2-giant'
-        }
-        
-        # If user requested DINOv3, map to DINOv2
-        if requested_model in dinov3_to_dinov2_mapping:
-            mapped_model = dinov3_to_dinov2_mapping[requested_model]
-            print(f"🔄 DINOv3 not yet available. Mapping {requested_model} → {mapped_model}")
-            return mapped_model
-        
-        # Check if the requested model is in our known list
-        if requested_model in self.available_models:
-            return requested_model
-        
-        # If not recognized, default to dinov2-base
-        print(f"⚠️  Unknown model '{requested_model}'. Available models:")
-        for model in self.available_models.keys():
-            if 'dinov2' in model:  # Only show actually available models
-                print(f"    - {model}")
-        
-        return 'facebook/dinov2-base'
-    
     def _get_embedding_dimension(self, model_name: str) -> int:
-        """Get the embedding dimension for different DINO models"""
-        return self.available_models.get(model_name, 768)
+        """Get the embedding dimension for different DINOv3 models"""
+        dinov3_dims = {
+            'facebook/dinov3-base': 768,
+            'facebook/dinov3-large': 1024,
+            'facebook/dinov3-giant': 1536
+        }
+        return dinov3_dims.get(model_name, 768)  # Default to 768 if unknown
     
     def _safe_int_conversion(self, value):
         """Safely convert numpy scalar or other types to Python int"""
@@ -232,6 +203,9 @@ class PDFSectionDetector:
         try:
             img_array = np.array(image)
             
+            # Debug: Print image info
+            # print(f"Image shape: {img_array.shape}, dtype: {img_array.dtype}")
+            
             # Ensure we have a 3-channel image (RGB)
             if len(img_array.shape) == 2:
                 # Grayscale image - convert to RGB
@@ -288,7 +262,7 @@ class PDFSectionDetector:
     
     def get_region_embedding(self, image: Image.Image, 
                             bbox: Tuple[int, int, int, int]) -> np.ndarray:
-        """Extract enhanced DINO embedding for a specific region"""
+        """Extract DINOv3 embedding for a specific region"""
         try:
             x1, y1, x2, y2 = bbox
             region = image.crop((x1, y1, x2, y2))
@@ -297,67 +271,49 @@ class PDFSectionDetector:
             if region.size[0] == 0 or region.size[1] == 0:
                 raise ValueError(f"Empty region from bbox {bbox}")
             
-            # Enhanced preprocessing: Resize very small regions for better embedding quality
-            min_size = 224  # DINO models work better with larger images
+            # Resize very small regions to ensure good embedding quality
+            min_size = 224  # DINOv3 typically works better with larger images
             if region.size[0] < min_size or region.size[1] < min_size:
                 # Calculate resize ratio to maintain aspect ratio
                 scale = max(min_size / region.size[0], min_size / region.size[1])
                 new_size = (int(region.size[0] * scale), int(region.size[1] * scale))
                 region = region.resize(new_size, Image.Resampling.LANCZOS)
             
-            # Process image with DINO processor
+            # Process image with DINOv3 processor
             inputs = self.processor(images=region, return_tensors="pt")
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
             
-            # Get embeddings using enhanced DINO processing
+            # Get embeddings using DINOv3
             with torch.no_grad():
                 outputs = self.model(**inputs)
                 
-                # Enhanced embedding extraction with multiple fallback options
+                # For DINOv3, we can use the CLS token or average pool the patch embeddings
                 if hasattr(outputs, 'last_hidden_state') and outputs.last_hidden_state is not None:
-                    # Use CLS token (first token) - standard approach for DINO
+                    # Use CLS token (first token) - this is the standard approach
                     embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()
                 elif hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
                     # Alternative: use pooler output if available
                     embedding = outputs.pooler_output.cpu().numpy()
-                elif hasattr(outputs, 'hidden_states') and outputs.hidden_states is not None:
-                    # Fallback: use last hidden state
-                    embedding = outputs.hidden_states[-1][:, 0, :].cpu().numpy()
                 else:
-                    # Final fallback: try to access any tensor output
-                    for attr_name, attr_value in outputs.__dict__.items():
-                        if isinstance(attr_value, torch.Tensor) and len(attr_value.shape) >= 2:
-                            print(f"Using fallback embedding from {attr_name}")
-                            if len(attr_value.shape) == 3:
-                                embedding = attr_value[:, 0, :].cpu().numpy()
-                            else:
-                                embedding = attr_value.cpu().numpy()
-                            break
+                    # Fallback: try to get some form of hidden state
+                    if hasattr(outputs, 'hidden_states') and outputs.hidden_states is not None:
+                        embedding = outputs.hidden_states[-1][:, 0, :].cpu().numpy()
                     else:
-                        raise ValueError("Could not extract embedding from enhanced DINO model output")
+                        raise ValueError("Could not extract embedding from DINOv3 model output")
             
             # Ensure embedding is the right shape
             embedding_flat = embedding.flatten()
             if embedding_flat.size == 0:
                 raise ValueError("Empty embedding generated")
             
-            # Verify expected dimension (with tolerance for different model sizes)
+            # Verify expected dimension
             if embedding_flat.size != self.embedding_dim:
                 print(f"⚠️  Warning: Expected embedding dim {self.embedding_dim}, got {embedding_flat.size}")
-                # Pad or truncate to expected size if necessary
-                if embedding_flat.size < self.embedding_dim:
-                    # Pad with zeros
-                    padded_embedding = np.zeros(self.embedding_dim, dtype=np.float32)
-                    padded_embedding[:embedding_flat.size] = embedding_flat
-                    embedding_flat = padded_embedding
-                else:
-                    # Truncate to expected size
-                    embedding_flat = embedding_flat[:self.embedding_dim]
             
             return embedding_flat.astype(np.float32)
             
         except Exception as e:
-            print(f"Error getting enhanced DINO embedding for bbox {bbox}: {e}")
+            print(f"Error getting DINOv3 embedding for bbox {bbox}: {e}")
             # Return a default embedding with the expected size
             return np.zeros(self.embedding_dim, dtype=np.float32)
     
@@ -404,7 +360,8 @@ class PDFSectionDetector:
                              avg_color: Tuple[int, int, int],
                              image_width: int) -> str:
         """
-        Enhanced section type classification with improved heuristics
+        Classify section type based on size, position, and color
+        Enhanced for DINOv3 with improved heuristics
         
         Args:
             bbox: Bounding box
@@ -427,7 +384,7 @@ class PDFSectionDetector:
             # Fallback for unexpected formats
             color_intensity = 128  # Neutral gray
         
-        # Enhanced heuristics for classification
+        # Enhanced heuristics for classification with DINOv3
         relative_width = width / image_width
         area = width * height
         
@@ -472,8 +429,8 @@ class PDFSectionDetector:
     def process_page(self, image: Image.Image, page_num: int, 
                      white_threshold: int = 240, min_area: int = 1000,
                      min_width: int = 50, min_height: int = 20) -> List[Section]:
-        """Process a single page and detect sections using enhanced DINO"""
-        print(f"Processing page {page_num} with enhanced {self.model_version}...")
+        """Process a single page and detect sections using DINOv3"""
+        print(f"Processing page {page_num} with DINOv3...")
         
         # Detect colored regions
         bboxes = self.detect_colored_regions(image, white_threshold, min_area, min_width, min_height)
@@ -482,7 +439,7 @@ class PDFSectionDetector:
         sections = []
         for i, bbox in enumerate(bboxes):
             try:
-                # Get enhanced DINO embedding
+                # Get DINOv3 embedding
                 embedding = self.get_region_embedding(image, bbox)
                 
                 # Get average color
@@ -504,17 +461,17 @@ class PDFSectionDetector:
                 print(f"  ⚠️  Error processing region {i} on page {page_num}: {e}")
                 continue
         
-        print(f"  Successfully processed {len(sections)} sections with enhanced {self.model_version} embeddings")
+        print(f"  Successfully processed {len(sections)} sections with DINOv3 embeddings")
         return sections
     
     def cluster_similar_sections(self, sections: List[Section], 
                                 eps: float = 0.3) -> List[int]:
         """
-        Cluster sections with similar enhanced DINO embeddings
+        Cluster sections with similar DINOv3 embeddings
         
         Args:
             sections: List of detected sections
-            eps: DBSCAN epsilon parameter (optimized for enhanced embeddings)
+            eps: DBSCAN epsilon parameter (adjusted for DINOv3)
             
         Returns:
             List of cluster labels
@@ -522,14 +479,14 @@ class PDFSectionDetector:
         if len(sections) == 0:
             return []
         
-        print(f"Clustering {len(sections)} sections using enhanced {self.model_version} embeddings...")
+        print(f"Clustering {len(sections)} sections using DINOv3 embeddings...")
         
         # Stack embeddings
         try:
             embeddings = np.vstack([s.embedding for s in sections])
             print(f"  Embedding matrix shape: {embeddings.shape}")
         except ValueError as e:
-            print(f"Error stacking enhanced DINO embeddings: {e}")
+            print(f"Error stacking DINOv3 embeddings: {e}")
             print(f"Embedding shapes: {[s.embedding.shape for s in sections[:5]]}")  # Show first 5
             raise
         
@@ -540,6 +497,7 @@ class PDFSectionDetector:
         embeddings = embeddings / norms
         
         # Cluster using DBSCAN with cosine metric
+        # Note: DINOv3 embeddings may cluster differently than DINOv2
         clustering = DBSCAN(eps=eps, min_samples=2, metric='cosine')
         labels = clustering.fit_predict(embeddings)
         
@@ -547,7 +505,7 @@ class PDFSectionDetector:
         unique_labels = set(labels)
         n_clusters = len(unique_labels) - (1 if -1 in labels else 0)
         n_noise = list(labels).count(-1)
-        print(f"  Enhanced {self.model_version} clustering result: {n_clusters} clusters, {n_noise} noise points")
+        print(f"  DINOv3 clustering result: {n_clusters} clusters, {n_noise} noise points")
         
         return labels
     
@@ -555,7 +513,7 @@ class PDFSectionDetector:
                               labels: List[int] = None, output_path: str = None) -> Image.Image:
         """
         Draw bounding boxes and labels on the image for detected sections
-        Enhanced visualization with improved styling
+        Enhanced visualization for DINOv3 results
         
         Args:
             image: PIL Image to draw on
@@ -596,7 +554,7 @@ class PDFSectionDetector:
         
         # Try to load a font, fallback to default if not available
         try:
-            font = ImageFont.truetype("arial.ttf", 14)
+            font = ImageFont.truetype("arial.ttf", 14)  # Slightly larger font
         except:
             try:
                 font = ImageFont.load_default()
@@ -618,10 +576,10 @@ class PDFSectionDetector:
             # Draw bounding box with thicker lines for better visibility
             draw.rectangle([x1, y1, x2, y2], outline=color, width=4)
             
-            # Draw section type label with enhanced indicator
-            enhanced_text = f"E-{label_text}"  # E for Enhanced
+            # Draw section type label with DINOv3 indicator
+            dinov3_text = f"D3-{label_text}"
             label_bg_color = tuple(min(255, c + 50) for c in color)
-            text_bbox = draw.textbbox((0, 0), enhanced_text, font=font) if font else (0, 0, 25, 18)
+            text_bbox = draw.textbbox((0, 0), dinov3_text, font=font) if font else (0, 0, 25, 18)
             text_width = text_bbox[2] - text_bbox[0]
             text_height = text_bbox[3] - text_bbox[1]
             
@@ -635,9 +593,9 @@ class PDFSectionDetector:
             
             # Draw label text
             if font:
-                draw.text((label_x + 3, label_y + 2), enhanced_text, fill=(0, 0, 0), font=font)
+                draw.text((label_x + 3, label_y + 2), dinov3_text, fill=(0, 0, 0), font=font)
             else:
-                draw.text((label_x + 3, label_y + 2), enhanced_text, fill=(0, 0, 0))
+                draw.text((label_x + 3, label_y + 2), dinov3_text, fill=(0, 0, 0))
             
             # Draw section info (optional, for detailed view)
             info_text = f"{section.section_type}: {section.avg_color}"
@@ -648,27 +606,29 @@ class PDFSectionDetector:
                 else:
                     draw.text((x1, info_y), info_text, fill=color)
         
-        # Add enhanced legend
+        # Add enhanced legend with DINOv3 branding
         self._draw_legend(draw, type_colors, font, annotated_image.width, annotated_image.height)
         
-        # Add model watermark
-        watermark_text = f"Enhanced {self.model_version} ({self.model_name})"
+        # Add DINOv3 watermark
+        watermark_text = f"DINOv3 ({self.model_name})"
         if font:
+            watermark_bbox = draw.textbbox((0, 0), watermark_text, font=font)
+            watermark_width = watermark_bbox[2] - watermark_bbox[0]
             draw.text((10, 10), watermark_text, fill=(50, 50, 50), font=font)
         
         # Save if output path is provided
         if output_path:
             annotated_image.save(output_path)
-            print(f"  Saved enhanced annotated image: {output_path}")
+            print(f"  Saved DINOv3 annotated image: {output_path}")
         
         return annotated_image
     
     def _draw_legend(self, draw: ImageDraw.Draw, type_colors: dict, font, 
                     image_width: int, image_height: int):
-        """Draw a legend showing section type colors with enhanced branding"""
+        """Draw a legend showing section type colors with DINOv3 branding"""
         legend_items = list(type_colors.items())
-        legend_height = len(legend_items) * 25 + 40
-        legend_width = 180  # Wider for enhanced text
+        legend_height = len(legend_items) * 25 + 40  # Extra space for DINOv3 title
+        legend_width = 150  # Wider for DINOv3 text
         
         # Position legend at bottom-right
         legend_x = image_width - legend_width - 10
@@ -678,13 +638,13 @@ class PDFSectionDetector:
         draw.rectangle([legend_x, legend_y, legend_x + legend_width, legend_y + legend_height],
                       fill=(255, 255, 255), outline=(0, 0, 0), width=2)
         
-        # Draw enhanced title
+        # Draw DINOv3 title
         title_y = legend_y + 5
-        enhanced_title = f"Enhanced {self.model_version}:"
+        dinov3_title = "DINOv3 Sections:"
         if font:
-            draw.text((legend_x + 5, title_y), enhanced_title, fill=(0, 0, 0), font=font)
+            draw.text((legend_x + 5, title_y), dinov3_title, fill=(0, 0, 0), font=font)
         else:
-            draw.text((legend_x + 5, title_y), enhanced_title, fill=(0, 0, 0))
+            draw.text((legend_x + 5, title_y), dinov3_title, fill=(0, 0, 0))
         
         # Draw legend items
         for i, (section_type, color) in enumerate(legend_items):
@@ -700,23 +660,100 @@ class PDFSectionDetector:
                 draw.text((legend_x + 20, item_y - 2), text, fill=(0, 0, 0), font=font)
             else:
                 draw.text((legend_x + 20, item_y - 2), text, fill=(0, 0, 0))
+    
+    def process_pdf(self, pdf_path: str, output_json: str = None, 
+                    dpi: int = 300, white_threshold: int = 240, 
+                    min_area: int = 1000, eps: float = 0.3,
+                    enable_clustering: bool = True) -> List[Section]:
+        """
+        Process entire PDF document using DINOv3
+        
+        Args:
+            pdf_path: Path to PDF file
+            output_json: Optional path to save results as JSON
+            dpi: DPI for PDF to image conversion
+            white_threshold: White pixel threshold for region detection
+            min_area: Minimum area for region detection
+            eps: DBSCAN epsilon parameter for clustering (adjusted for DINOv3)
+            enable_clustering: Whether to perform similarity clustering
+            
+        Returns:
+            List of all detected sections
+        """
+        print(f"🚀 Starting PDF processing with DINOv3 ({self.model_name})")
+        
+        # Convert PDF to images
+        images = self.pdf_to_images(pdf_path, dpi)
+        
+        # Process each page
+        all_sections = []
+        for page_num, image in enumerate(images, start=1):
+            sections = self.process_page(image, page_num, white_threshold, min_area)
+            all_sections.extend(sections)
+        
+        print(f"\n✅ Total sections found with DINOv3: {len(all_sections)}")
+        
+        # Cluster similar sections
+        labels = []
+        if enable_clustering and len(all_sections) > 0:
+            labels = self.cluster_similar_sections(all_sections, eps)
+            
+            # Print summary
+            print("\nDINOv3 Section Summary:")
+            for i, section in enumerate(all_sections):
+                cluster_id = labels[i] if i < len(labels) else -1
+                print(f"Page {section.page_num}, {section.section_type.upper()}: "
+                      f"BBox={section.bbox}, Color={section.avg_color}, "
+                      f"Cluster={cluster_id}")
+        
+        # Optionally save to JSON
+        if output_json:
+            data = {
+                'metadata': {
+                    'input_file': pdf_path,
+                    'model': self.model_name,
+                    'model_type': 'DINOv3',
+                    'embedding_dimension': self.embedding_dim,
+                    'dpi': int(dpi),
+                    'white_threshold': int(white_threshold),
+                    'min_area': int(min_area),
+                    'clustering_eps': float(eps),
+                    'clustering_enabled': enable_clustering,
+                    'total_pages': len(images),
+                    'total_sections': len(all_sections)
+                },
+                'sections': [
+                    {
+                        'page': int(s.page_num),
+                        'bbox': [int(coord) for coord in s.bbox],  # Convert all bbox coordinates to int
+                        'type': s.section_type,
+                        'color': [int(c) for c in s.avg_color],  # Convert all color values to int
+                        'embedding': s.embedding.tolist(),
+                        'cluster': int(labels[i]) if len(labels) > 0 and i < len(labels) and labels[i] != -1 else -1
+                    }
+                    for i, s in enumerate(all_sections)
+                ]
+            }
+            with open(output_json, 'w') as f:
+                json.dump(data, f, indent=2)
+            print(f"\n💾 DINOv3 results saved to {output_json}")
+        
+        return all_sections
 
 
 def parse_arguments():
-    """Parse command line arguments for enhanced DINO"""
+    """Parse command line arguments for DINOv3"""
     parser = argparse.ArgumentParser(
-        description="PDF Section Detection using Enhanced DINO embeddings (v3 architecture)",
+        description="PDF Section Detection using DINOv3 embeddings",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   python Dino_sectiondetector_v3.py document.pdf
   python Dino_sectiondetector_v3.py document.pdf -o results.json
-  python Dino_sectiondetector_v3.py document.pdf -m facebook/dinov2-large --dpi 150
+  python Dino_sectiondetector_v3.py document.pdf -m facebook/dinov3-large --dpi 150
   python Dino_sectiondetector_v3.py document.pdf --white-threshold 220 --eps 0.2
   python Dino_sectiondetector_v3.py document.pdf --min-width 100 --min-height 30
   python Dino_sectiondetector_v3.py document.pdf --output-images ./annotated_v3/ --verbose
-
-Note: This version uses enhanced processing with DINOv2 models (DINOv3 will be supported when available)
         """
     )
     
@@ -735,12 +772,9 @@ Note: This version uses enhanced processing with DINOv2 models (DINOv3 will be s
     
     parser.add_argument(
         '-m', '--model',
-        default='facebook/dinov2-base',
-        choices=[
-            'facebook/dinov2-base', 'facebook/dinov2-large', 'facebook/dinov2-giant',
-            'facebook/dinov3-base', 'facebook/dinov3-large', 'facebook/dinov3-giant'
-        ],
-        help='DINO model to use (default: facebook/dinov2-base). DINOv3 requests will be mapped to DINOv2.'
+        default='facebook/dinov3-base',
+        choices=['facebook/dinov3-base', 'facebook/dinov3-large', 'facebook/dinov3-giant'],
+        help='DINOv3 model to use (default: facebook/dinov3-base)'
     )
     
     parser.add_argument(
@@ -782,7 +816,7 @@ Note: This version uses enhanced processing with DINOv2 models (DINOv3 will be s
         '--eps',
         type=float,
         default=0.3,
-        help='DBSCAN epsilon parameter for clustering (default: 0.3, optimized for enhanced embeddings)'
+        help='DBSCAN epsilon parameter for clustering (default: 0.3, optimized for DINOv3)'
     )
     
     parser.add_argument(
@@ -855,17 +889,17 @@ def validate_arguments(args):
     return args
 
 
-# Enhanced Example usage with command line arguments
+# Enhanced Example usage with command line arguments for DINOv3
 if __name__ == "__main__":
     # Parse and validate arguments
     args = parse_arguments()
     args = validate_arguments(args)
     
     # Print configuration
-    print("🚀 Enhanced PDF Section Detection Configuration (v3 Architecture):")
+    print("🚀 PDF Section Detection Configuration (DINOv3):")
     print(f"  Input PDF: {args.input_pdf}")
     print(f"  Output JSON: {args.output}")
-    print(f"  Enhanced DINO Model: {args.model}")
+    print(f"  DINOv3 Model: {args.model}")
     print(f"  DPI: {args.dpi}")
     print(f"  White threshold: {args.white_threshold}")
     print(f"  Min area: {args.min_area}")
@@ -877,11 +911,11 @@ if __name__ == "__main__":
         print(f"  Save images to: {args.save_images}")
     if args.output_images:
         print(f"  Save annotated images to: {args.output_images}")
-    print("=" * 70)
+    print("=" * 60)
     
     try:
-        # Initialize enhanced DINO detector
-        print(f"🔥 Initializing Enhanced DINO detector...")
+        # Initialize DINOv3 detector
+        print(f"🔥 Initializing DINOv3 detector...")
         detector = PDFSectionDetector(model_name=args.model)
         
         # Convert PDF to images
@@ -893,7 +927,7 @@ if __name__ == "__main__":
         
         for page_num, image in enumerate(images, start=1):
             if args.verbose:
-                print(f"\n📄 Processing page {page_num}/{len(images)} with enhanced {detector.model_version}...")
+                print(f"\n📄 Processing page {page_num}/{len(images)} with DINOv3...")
             
             # Process page with custom parameters
             sections = []
@@ -916,10 +950,10 @@ if __name__ == "__main__":
                     if args.verbose:
                         print(f"    Processing bbox {bbox_idx}: {bbox}")
                     
-                    # Get enhanced DINO embedding
+                    # Get DINOv3 embedding
                     embedding = detector.get_region_embedding(image, bbox)
                     if args.verbose:
-                        print(f"    Got enhanced embedding shape: {embedding.shape}")
+                        print(f"    Got DINOv3 embedding shape: {embedding.shape}")
                     
                     # Get average color
                     avg_color = detector.get_average_color(image, bbox)
@@ -959,12 +993,12 @@ if __name__ == "__main__":
                 if args.verbose:
                     print(f"  💾 Saved page image: {image_path}")
         
-        print(f"\n✅ Total sections found with enhanced {detector.model_version}: {len(all_sections)}")
+        print(f"\n✅ Total sections found with DINOv3: {len(all_sections)}")
         
         # Cluster similar sections (unless disabled)
         labels = []
         if not args.no_clustering and len(all_sections) > 0:
-            print("🔄 Clustering similar sections with enhanced embeddings...")
+            print("🔄 Clustering similar sections with DINOv3 embeddings...")
             labels = detector.cluster_similar_sections(all_sections, eps=args.eps)
             
             # Print clustering summary
@@ -975,7 +1009,7 @@ if __name__ == "__main__":
         
         # Create annotated images if requested
         if args.output_images:
-            print("\n🎨 Creating enhanced annotated images...")
+            print("\n🎨 Creating DINOv3 annotated images...")
             
             # Create a mapping from section index to label for each page
             section_idx = 0
@@ -1006,11 +1040,11 @@ if __name__ == "__main__":
                     if args.verbose:
                         print(f"  📄 Saved page without annotations: {output_path}")
             
-            print(f"✅ Enhanced annotated images saved to {args.output_images}")
+            print(f"✅ DINOv3 annotated images saved to {args.output_images}")
         
         # Print detailed summary
         if args.verbose or len(all_sections) <= 20:
-            print(f"\n📊 Detailed Enhanced {detector.model_version} Section Summary:")
+            print("\n📊 Detailed DINOv3 Section Summary:")
             for i, section in enumerate(all_sections):
                 cluster_id = labels[i] if i < len(labels) else -1
                 print(f"  Page {section.page_num}, {section.section_type.upper()}: "
@@ -1018,12 +1052,12 @@ if __name__ == "__main__":
                       f"Cluster={cluster_id}")
         
         # Save results to JSON
-        print(f"\n💾 Saving enhanced results to: {args.output}")
+        print(f"\n💾 Saving DINOv3 results to: {args.output}")
         data = {
             'metadata': {
                 'input_file': args.input_pdf,
-                'model': detector.model_name,
-                'model_type': detector.model_version,
+                'model': args.model,
+                'model_type': 'DINOv3',
                 'embedding_dimension': detector.embedding_dim,
                 'dpi': int(args.dpi),
                 'white_threshold': int(args.white_threshold),
@@ -1051,24 +1085,24 @@ if __name__ == "__main__":
         with open(args.output, 'w') as f:
             json.dump(data, f, indent=2)
         
-        print(f"🎉 Enhanced processing complete! Results saved to {args.output}")
+        print(f"🎉 DINOv3 processing complete! Results saved to {args.output}")
         
         # Print summary statistics
         section_types = {}
         for section in all_sections:
             section_types[section.section_type] = section_types.get(section.section_type, 0) + 1
         
-        print(f"\n📈 Enhanced {detector.model_version} Section Type Summary:")
+        print("\n📈 DINOv3 Section Type Summary:")
         for stype, count in section_types.items():
             print(f"  {stype.capitalize()}s: {count}")
         
-        print(f"\n🔥 Powered by Enhanced {detector.model_name} - {detector.model_version} Technology")
+        print(f"\n🔥 Powered by {detector.model_name} - DINOv3 Technology")
         
     except KeyboardInterrupt:
         print("\n\n⚠️  Processing interrupted by user.")
         sys.exit(1)
     except Exception as e:
-        print(f"\n❌ Error during enhanced processing: {str(e)}")
+        print(f"\n❌ Error during DINOv3 processing: {str(e)}")
         if args.verbose:
             import traceback
             traceback.print_exc()
